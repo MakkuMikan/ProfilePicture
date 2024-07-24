@@ -1,0 +1,312 @@
+<!doctype html>
+
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>single page react boilerplate</title>
+    <meta name="description" content="The HTML5 Herald">
+    <meta name="author" content="kokaneka">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div id="root" dir="auto"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const CropTool = () => {
+            const canvasRef = useRef(null);
+            const imageInputRef = useRef(null);
+            const [image, setImage] = useState(null);
+            const [crops, setCrops] = useState([]);
+            const [isSelecting, setIsSelecting] = useState(false);
+            const [isDragging, setIsDragging] = useState(false);
+            const [isResizing, setIsResizing] = useState(false);
+            const [startX, setStartX] = useState(0);
+            const [startY, setStartY] = useState(0);
+            const [endX, setEndX] = useState(0);
+            const [endY, setEndY] = useState(0);
+            const [selectedCrop, setSelectedCrop] = useState(null);
+
+            const resizeHandleSize = 10;
+            const deleteHandleSize = 10;
+            const previewSize = 100;
+
+            const handleImageUpload = (event) => {
+                const file = event.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        setImage(img);
+                        const canvas = canvasRef.current;
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        setCrops([]);
+                    };
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const drawSelection = useCallback(() => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(image, 0, 0);
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                const crop = getSquareCrop(startX, startY, endX, endY);
+                ctx.strokeRect(crop.x, crop.y, crop.size, crop.size);
+            }, [image, startX, startY, endX, endY]);
+
+            const drawCrops = useCallback(() => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(image, 0, 0);
+                crops.forEach((crop) => {
+                    ctx.strokeStyle = 'red';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(crop.x, crop.y, crop.size, crop.size);
+                    drawResizeHandle(crop);
+                    drawDeleteHandle(crop);
+                });
+            }, [image, crops]);
+
+            const getSquareCrop = (x1, y1, x2, y2) => {
+                const size = Math.min(Math.abs(x2 - x1), Math.abs(y2 - y1));
+                return {
+                    x: Math.min(x1, x2),
+                    y: Math.min(y1, y2),
+                    size,
+                    displayName: '',
+                    username: '',
+                };
+            };
+
+            const isInsideCrop = (x, y, crop) => {
+                return x >= crop.x && x <= crop.x + crop.size && y >= crop.y && y <= crop.y + crop.size;
+            };
+
+            const isOnResizeHandle = (x, y, crop) => {
+                return (
+                    x >= crop.x + crop.size - resizeHandleSize &&
+                    x <= crop.x + crop.size &&
+                    y >= crop.y + crop.size - resizeHandleSize &&
+                    y <= crop.y + crop.size
+                );
+            };
+
+            const isOnDeleteHandle = (x, y, crop) => {
+                return x >= crop.x && x <= crop.x + deleteHandleSize && y >= crop.y && y <= crop.y + deleteHandleSize;
+            };
+
+            const moveCrop = (crop, dx, dy) => {
+                crop.x += dx;
+                crop.y += dy;
+            };
+
+            const resizeCrop = (crop, x, y) => {
+                const newSize = Math.min(x - crop.x, y - crop.y);
+                crop.size = newSize;
+            };
+
+            const drawResizeHandle = (crop) => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(crop.x + crop.size - resizeHandleSize, crop.y + crop.size - resizeHandleSize, resizeHandleSize, resizeHandleSize);
+            };
+
+            const drawDeleteHandle = (crop) => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'red';
+                ctx.fillRect(crop.x, crop.y, deleteHandleSize, deleteHandleSize);
+            };
+
+            const handleMouseDown = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const newStartX = e.clientX - rect.left;
+                const newStartY = e.clientY - rect.top;
+                setStartX(newStartX);
+                setStartY(newStartY);
+
+                const crop = crops.find((crop) => isInsideCrop(newStartX, newStartY, crop));
+                if (crop) {
+                    setSelectedCrop(crop);
+                    if (isOnResizeHandle(newStartX, newStartY, crop)) {
+                        setIsResizing(true);
+                    } else if (isOnDeleteHandle(newStartX, newStartY, crop)) {
+                        setCrops(crops.filter((c) => c !== crop));
+                        setSelectedCrop(null);
+                        drawCrops();
+                    } else {
+                        setIsDragging(true);
+                    }
+                } else {
+                    setIsSelecting(true);
+                }
+            };
+
+            const handleMouseMove = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const newEndX = e.clientX - rect.left;
+                const newEndY = e.clientY - rect.top;
+                setEndX(newEndX);
+                setEndY(newEndY);
+
+                if (isSelecting) {
+                    drawSelection();
+                } else if (isDragging && selectedCrop) {
+                    moveCrop(selectedCrop, newEndX - startX, newEndY - startY);
+                    setStartX(newEndX);
+                    setStartY(newEndY);
+                    drawCrops();
+                } else if (isResizing && selectedCrop) {
+                    resizeCrop(selectedCrop, newEndX, newEndY);
+                    drawCrops();
+                }
+
+                if (selectedCrop) {
+                    if (isOnResizeHandle(newEndX, newEndY, selectedCrop)) {
+                        canvasRef.current.style.cursor = 'nwse-resize';
+                    } else if (isOnDeleteHandle(newEndX, newEndY, selectedCrop)) {
+                        canvasRef.current.style.cursor = 'pointer';
+                    } else if (isInsideCrop(newEndX, newEndY, selectedCrop)) {
+                        canvasRef.current.style.cursor = 'move';
+                    } else {
+                        canvasRef.current.style.cursor = 'default';
+                    }
+                } else {
+                    canvasRef.current.style.cursor = 'default';
+                }
+            };
+
+            const handleMouseUp = () => {
+                if (isSelecting) {
+                    setIsSelecting(false);
+                    const crop = getSquareCrop(startX, startY, endX, endY);
+                    setCrops([...crops, crop]);
+                }
+                setIsDragging(false);
+                setIsResizing(false);
+                drawCrops();
+            };
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                canvas.addEventListener('mousedown', handleMouseDown);
+                canvas.addEventListener('mousemove', handleMouseMove);
+                canvas.addEventListener('mouseup', handleMouseUp);
+
+                return () => {
+                    canvas.removeEventListener('mousedown', handleMouseDown);
+                    canvas.removeEventListener('mousemove', handleMouseMove);
+                    canvas.removeEventListener('mouseup', handleMouseUp);
+                };
+            }, [crops, isSelecting, isDragging, isResizing, startX, startY, endX, endY, selectedCrop, drawSelection, drawCrops]);
+
+            const updateCropDisplayName = (index, value) => {
+                const updatedCrops = [...crops];
+                updatedCrops[index].displayName = value;
+                setCrops(updatedCrops);
+            };
+
+            const updateCropUsername = (index, value) => {
+                const updatedCrops = [...crops];
+                updatedCrops[index].username = value;
+                setCrops(updatedCrops);
+            };
+
+            const handleSaveCrops = () => {
+                crops.forEach((crop, index) => {
+                    const cropCanvas = document.createElement('canvas');
+                    cropCanvas.width = crop.size;
+                    cropCanvas.height = crop.size;
+                    const cropCtx = cropCanvas.getContext('2d');
+                    cropCtx.save();
+                    cropCtx.beginPath();
+                    cropCtx.arc(crop.size / 2, crop.size / 2, crop.size / 2, 0, Math.PI * 2);
+                    cropCtx.clip();
+                    cropCtx.drawImage(image, crop.x, crop.y, crop.size, crop.size, 0, 0, crop.size, crop.size);
+                    cropCtx.restore();
+
+                    const link = document.createElement('a');
+                    link.href = cropCanvas.toDataURL();
+                    link.download = `crop${index + 1}.png`;
+                    link.click();
+                });
+            };
+
+            return (
+                <div>
+                    <input type="file" ref={imageInputRef} onChange={handleImageUpload} />
+                    <canvas ref={canvasRef}></canvas>
+                    <button onClick={handleSaveCrops}>Save Crops</button>
+                    <div>
+                        {crops.map((crop, index) => (
+                            <div key={index} style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
+                                <div style={{ position: 'relative' }}>
+                                    <canvas
+                                        width={previewSize}
+                                        height={previewSize}
+                                        style={{ borderRadius: '50%' }}
+                                        ref={(el) => {
+                                            if (el) {
+                                                const cropCtx = el.getContext('2d');
+                                                cropCtx.save();
+                                                cropCtx.beginPath();
+                                                cropCtx.arc(previewSize / 2, previewSize / 2, previewSize / 2, 0, Math.PI * 2);
+                                                cropCtx.clip();
+                                                cropCtx.drawImage(image, crop.x, crop.y, crop.size, crop.size, 0, 0, previewSize, previewSize);
+                                                cropCtx.restore();
+                                            }
+                                        }}
+                                    ></canvas>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', marginLeft: '10px', flex: '1' }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Display Name"
+                                        value={crop.displayName}
+                                        onChange={(e) => {
+                                            updateCropDisplayName(index, e.target.value);
+                                        }}
+                                        style={{ padding: '5px', marginBottom: '5px' }}
+                                    />
+                                    <input
+                                        type="text"
+                                        placeholder="Username"
+                                        value={crop.username}
+                                        onChange={(e) => {
+                                            updateCropUsername(index, e.target.value);
+                                        }}
+                                        style={{ padding: '5px' }}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(
+            <CropTool />,
+            document.getElementById('root')
+        );
+    </script>
+
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
+
+</body>
+
+</html>
